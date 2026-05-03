@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>痛み記録アプリ</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/lucide-static@0.321.0/font/lucide.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+        body { 
+            font-family: 'Noto Sans JP', sans-serif; 
+            -webkit-tap-highlight-color: transparent; 
+            touch-action: manipulation;
+            overscroll-behavior-y: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 26px;
+            height: 26px;
+            background: #2563eb;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid white;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { 
+            from { opacity: 0; transform: translateY(8px); } 
+            to { opacity: 1; transform: translateY(0); } 
+        }
+        .sticky-col {
+            position: sticky;
+            left: 0;
+            background: white;
+            z-index: 10;
+            box-shadow: 2px 0 5px -2px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+
+        // --- 定数定義 ---
+        const BODY_PARTS = [
+            { id: 'head', label: '頭 (頭痛)', emoji: '🤕' },
+            { id: 'wrist_r', label: '右手首', emoji: '🤚' },
+            { id: 'wrist_l', label: '左手首', emoji: '🤚' },
+            { id: 'knee_r', label: '右膝', emoji: '🦵' },
+            { id: 'knee_l', label: '左膝', emoji: '🦵' },
+            { id: 'ankle_r', label: '右足首', emoji: '🦶' },
+            { id: 'ankle_l', label: '左足首', emoji: '🦶' },
+            { id: 'other', label: 'その他', emoji: '❓' },
+        ];
+
+        const TIMINGS = [
+            { id: 'morning', label: '朝', icon: 'sun', color: 'text-orange-500' },
+            { id: 'noon', label: '昼', icon: 'cloud-sun', color: 'text-amber-500' },
+            { id: 'evening', label: '晩', icon: 'moon', color: 'text-blue-500' },
+            { id: 'night', label: '夜/寝前', icon: 'moon-star', color: 'text-indigo-600' },
+        ];
+
+        const BODY_MAP = {
+            head: { cx: 100, cy: 40, r: 28 },
+            wrist_r: { cx: 40, cy: 180, r: 18 },  
+            wrist_l: { cx: 160, cy: 180, r: 18 }, 
+            knee_r: { cx: 77, cy: 260, r: 18 },
+            knee_l: { cx: 123, cy: 260, r: 18 },
+            ankle_r: { cx: 75, cy: 350, r: 18 },
+            ankle_l: { cx: 125, cy: 350, r: 18 },
+        };
+
+        const INITIAL_LEVELS = BODY_PARTS.reduce((acc, part) => ({ ...acc, [part.id]: 0 }), {});
+
+        // --- ユーティリティ関数 ---
+        const guessTimingFromTime = (timeStr) => {
+            if (!timeStr) return 'morning';
+            const hour = parseInt(timeStr.split(':')[0], 10);
+            if (hour >= 4 && hour < 11) return 'morning';
+            if (hour >= 11 && hour < 16) return 'noon';
+            if (hour >= 16 && hour < 20) return 'evening';
+            return 'night';
+        };
+
+        const getLevelColor = (lv, isBadge = false) => {
+            if (lv === 0) return isBadge ? 'text-slate-400 bg-slate-50 border-slate-200' : 'bg-slate-200';
+            if (lv <= 3) return isBadge ? 'text-green-600 bg-green-50 border-green-200' : 'bg-green-500';
+            if (lv <= 6) return isBadge ? 'text-amber-700 bg-amber-50 border-amber-200' : 'bg-amber-500';
+            return isBadge ? 'text-red-700 bg-red-50 border-red-200' : 'bg-red-500';
+        };
+
+        // --- 共通コンポーネント ---
+        const Icon = ({ name, size = 24, className = "" }) => (
+            <i className={`lucide-${name} ${className}`} style={{ fontSize: size, width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}></i>
+        );
+
+        const Silhouette = ({ timingId, levelsByTiming }) => {
+            const levels = levelsByTiming[timingId];
+            const info = TIMINGS.find(t => t.id === timingId);
+            const has = Object.keys(levels).length > 0;
+            return (
+                <div className={`flex flex-col items-center bg-white p-3 rounded-2xl border transition-all ${has ? 'border-blue-100 shadow-sm' : 'border-slate-100 opacity-40'}`}>
+                    <div className={`flex items-center gap-1 font-bold text-[10px] mb-2 ${info.color}`}>
+                        <Icon name={info.icon} size={14} /> {info.label}
+                    </div>
+                    <div className="relative w-full max-w-[100px]">
+                        <svg viewBox="0 0 200 400" className="w-full h-auto drop-shadow-sm">
+                            <g fill="#f1f5f9" stroke="#cbd5e1" strokeWidth="4">
+                                <path d="M 60 90 Q 30 130 40 180" fill="none" strokeWidth="20" strokeLinecap="round" />
+                                <path d="M 140 90 Q 170 130 160 180" fill="none" strokeWidth="20" strokeLinecap="round" />
+                                <path d="M 82 170 L 77 260 L 75 350" fill="none" strokeWidth="24" strokeLinecap="round" strokeLinejoin="round"/>
+                                <path d="M 118 170 L 123 260 L 125 350" fill="none" strokeWidth="24" strokeLinecap="round" strokeLinejoin="round"/>
+                                <rect x="65" y="75" width="70" height="110" rx="25" />
+                                <circle cx="100" cy="40" r="28" />
+                            </g>
+                            {has && Object.entries(BODY_MAP).map(([id, pos]) => {
+                                const lv = levels[id];
+                                if (!lv) return null;
+                                return (
+                                    <g key={id}>
+                                        <circle cx={pos.cx} cy={pos.cy} r={pos.r + 6} fill={`rgba(239, 68, 68, ${0.15 + (lv/10)*0.75})`} />
+                                        <circle cx={pos.cx} cy={pos.cy} r={pos.r < 15 ? 10 : 12} fill="white" fillOpacity="0.8" />
+                                        <text x={pos.cx} y={pos.cy} textAnchor="middle" dominantBaseline="central" fill="#b91c1c" fontSize="14" fontWeight="900">{lv}</text>
+                                    </g>
+                                );
+                            })}
+                        </svg>
+                    </div>
+                </div>
+            );
+        };
+
+        const SliderRow = ({ part, lv, onChange }) => {
+            const active = lv > 0;
+            return (
+                <div className="flex items-center gap-3">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl border transition-colors ${active ? 'bg-blue-100 border-blue-200 shadow-sm' : 'bg-slate-50 border-slate-100'}`}>
+                        {part.emoji}
+                    </div>
+                    <div className="flex-1">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className={`text-xs font-bold ${active ? 'text-slate-800' : 'text-slate-400'}`}>{part.label}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getLevelColor(lv, true)}`}>
+                                {active ? `Lv.${lv}` : 'なし'}
+                            </span>
+                        </div>
+                        <div className="relative pb-5">
+                            <input type="range" min="0" max="10" value={lv} onChange={e => onChange(parseInt(e.target.value))} 
+                                className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${active ? 'bg-blue-200 accent-blue-600' : 'bg-slate-200'}`} 
+                            />
+                            <div className="flex justify-between px-1 mt-1">
+                                {[0,1,2,3,4,5,6,7,8,9,10].map(n => (
+                                    <div key={n} className="flex flex-col items-center w-2">
+                                        <div className={`w-0.5 h-1.5 ${active && n > 0 && lv >= n ? 'bg-blue-400' : 'bg-slate-300'}`}></div>
+                                        <span className="absolute top-2.5 text-[8px] text-slate-400 font-bold">{n}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- メインアプリケーション ---
+        function App() {
+            const [activeTab, setActiveTab] = useState('input');
+            const [records, setRecords] = useState([]);
+            const [gasUrl, setGasUrl] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [showSuccess, setShowSuccess] = useState(false);
+            const [successMsg, setSuccessMsg] = useState('');
+            const [errorMsg, setErrorMsg] = useState('');
+            const [displayDate, setDisplayDate] = useState(new Date().toISOString().split('T')[0]);
+            const [deleteConfirmIds, setDeleteConfirmIds] = useState(null);
+
+            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+            const [time, setTime] = useState(new Date().toTimeString().substring(0, 5));
+            const [timing, setTiming] = useState(guessTimingFromTime(new Date().toTimeString().substring(0, 5)));
+            const [partLevels, setPartLevels] = useState(INITIAL_LEVELS);
+            const [memo, setMemo] = useState('');
+
+            const [editingKey, setEditingKey] = useState(null);
+            const [editDate, setEditDate] = useState('');
+            const [editTime, setEditTime] = useState('');
+            const [editTiming, setEditTiming] = useState('');
+            const [editPartLevels, setEditPartLevels] = useState(INITIAL_LEVELS);
+            const [editMemo, setEditMemo] = useState('');
+
+            useEffect(() => {
+                const savedUrl = localStorage.getItem('gas_web_app_url');
+                if (savedUrl) {
+                    setGasUrl(savedUrl);
+                    fetchData(savedUrl);
+                } else {
+                    const localData = localStorage.getItem('pain_records');
+                    if (localData) setRecords(JSON.parse(localData));
+                }
+            }, []);
+
+            const fetchData = async (url) => {
+                if (!url) return;
+                setIsLoading(true);
+                setErrorMsg('');
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if (Array.isArray(data)) {
+                        setRecords(data);
+                        localStorage.setItem('pain_records', JSON.stringify(data));
+                    }
+                } catch (e) {
+                    setErrorMsg("データの同期に失敗しました。URLまたはGASの設定（権限）を確認してください。");
+                }
+                setIsLoading(false);
+            };
+
+            const sendToGAS = async (payload) => {
+                if (!gasUrl) return true;
+                try {
+                    await fetch(gasUrl, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify(payload)
+                    });
+                    return true;
+                } catch (e) {
+                    setErrorMsg("保存時に通信エラーが発生しました。");
+                    return false;
+                }
+            };
+
+            const handleSave = async () => {
+                const partsToSave = Object.entries(partLevels).filter(([_, lv]) => lv > 0);
+                if (partsToSave.length === 0) return;
+
+                setIsLoading(true);
+                const newRecs = partsToSave.map(([id, lv], i) => ({
+                    id: `${Date.now()}-${i}`,
+                    timestamp: `${date}T${time}`,
+                    timing,
+                    part: BODY_PARTS.find(p => p.id === id).label,
+                    level: lv,
+                    memo: memo.trim()
+                }));
+
+                const success = await sendToGAS({ action: 'save', records: newRecs });
+                if (success) {
+                    const updated = [...newRecs, ...records];
+                    setRecords(updated);
+                    localStorage.setItem('pain_records', JSON.stringify(updated));
+                    setPartLevels(INITIAL_LEVELS);
+                    setMemo('');
+                    setSuccessMsg('記録を保存しました');
+                    setShowSuccess(true);
+                    setTimeout(() => setShowSuccess(false), 2000);
+                    setTimeout(() => fetchData(gasUrl), 1500);
+                }
+                setIsLoading(false);
+            };
+
+            const handleDelete = async (ids) => {
+                setIsLoading(true);
+                const success = await sendToGAS({ action: 'delete', ids });
+                if (success) {
+                    const updated = records.filter(r => !ids.includes(r.id));
+                    setRecords(updated);
+                    localStorage.setItem('pain_records', JSON.stringify(updated));
+                }
+                setIsLoading(false);
+                setDeleteConfirmIds(null);
+            };
+
+            const saveEditing = async () => {
+                const partsToSave = Object.entries(editPartLevels).filter(([_, lv]) => lv > 0);
+                if (partsToSave.length === 0) return;
+
+                setIsLoading(true);
+                const grouped = getGroupedRecords();
+                const oldIds = grouped[editingKey].ids;
+
+                const newRecs = partsToSave.map(([id, lv], i) => ({
+                    id: `edit-${Date.now()}-${i}`,
+                    timestamp: `${editDate}T${editTime}`,
+                    timing: editTiming,
+                    part: BODY_PARTS.find(p => p.id === id).label,
+                    level: lv,
+                    memo: editMemo.trim()
+                }));
+
+                const success = await sendToGAS({ action: 'update', oldIds, newRecords: newRecs });
+                if (success) {
+                    const remaining = records.filter(r => !oldIds.includes(r.id));
+                    const updated = [...newRecs, ...remaining].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    setRecords(updated);
+                    localStorage.setItem('pain_records', JSON.stringify(updated));
+                    setEditingKey(null);
+                    setSuccessMsg('記録を更新しました');
+                    setShowSuccess(true);
+                    setTimeout(() => setShowSuccess(false), 2000);
+                    setTimeout(() => fetchData(gasUrl), 1500);
+                }
+                setIsLoading(false);
+            };
+
+            const getGroupedRecords = useCallback(() => {
+                const grouped = {};
+                records.forEach(r => {
+                    const key = r.timestamp;
+                    if (!grouped[key]) grouped[key] = { timestamp: r.timestamp, timing: r.timing, memos: [], parts: {}, ids: [] };
+                    grouped[key].parts[r.part] = r.level;
+                    if (r.memo && !grouped[key].memos.includes(r.memo)) grouped[key].memos.push(r.memo);
+                    grouped[key].ids.push(r.id);
+                });
+                return grouped;
+            }, [records]);
+
+            const getLevelsByTiming = useCallback(() => {
+                const res = { morning: {}, noon: {}, evening: {}, night: {} };
+                const filtered = records.filter(r => r.timestamp.startsWith(displayDate));
+                filtered.forEach(r => {
+                    const t = r.timing || guessTimingFromTime(r.timestamp.split('T')[1]);
+                    const p = BODY_PARTS.find(part => part.label === r.part);
+                    if (p && res[t][p.id] === undefined) res[t][p.id] = r.level;
+                });
+                return res;
+            }, [records, displayDate]);
+
+            const saveGasUrl = () => {
+                const cleanedUrl = gasUrl.replace(/^[\[<"'\s]+|[\]>"'\s]+$/g, '').trim();
+                setGasUrl(cleanedUrl);
+                localStorage.setItem('gas_web_app_url', cleanedUrl);
+                setSuccessMsg('設定を保存しました');
+                setShowSuccess(true);
+                setTimeout(() => setShowSuccess(false), 2000);
+                if (cleanedUrl) fetchData(cleanedUrl);
+            };
+
+            const exportCSV = () => {
+                const grouped = getGroupedRecords();
+                const sorted = Object.keys(grouped).sort((a,b) => new Date(b) - new Date(a));
+                const headers = ["日付", "時刻", "時間帯", ...BODY_PARTS.map(p => p.label), "メモ"];
+                const rows = sorted.map(key => {
+                    const r = grouped[key];
+                    const d = new Date(r.timestamp);
+                    return [
+                        `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`,
+                        `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,
+                        TIMINGS.find(t => t.id === r.timing)?.label || '',
+                        ...BODY_PARTS.map(p => r.parts[p.label] || ""),
+                        `"${r.memos.join(' / ').replace(/"/g, '""')}"`
+                    ].join(",");
+                });
+                const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), [headers.join(","), ...rows].join("\n")], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `痛み記録表_${Date.now()}.csv`;
+                a.click();
+            };
+
+            const grouped = getGroupedRecords();
+            const sortedKeys = Object.keys(grouped).sort((a,b) => new Date(b) - new Date(a));
+            const currentLevelsByTiming = getLevelsByTiming();
+
+            const startEditingRow = (key) => {
+                const row = grouped[key];
+                const [d, t] = row.timestamp.split('T');
+                setEditDate(d);
+                setEditTime(t.substring(0, 5));
+                setEditTiming(row.timing);
+                const levels = { ...INITIAL_LEVELS };
+                Object.keys(row.parts).forEach(label => {
+                    const p = BODY_PARTS.find(part => part.label === label);
+                    if (p) levels[p.id] = row.parts[label];
+                });
+                setEditPartLevels(levels);
+                setEditMemo(row.memos.join(' / '));
+                setEditingKey(key);
+            };
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col relative pb-safe overflow-x-hidden">
+                    {/* ダイアログ類 */}
+                    {deleteConfirmIds && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl fade-in text-center">
+                                <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mb-4 mx-auto"><Icon name="trash-2" className="text-red-500" size={28} /></div>
+                                <h3 className="font-black text-slate-800 mb-2">記録を削除しますか？</h3>
+                                <p className="text-xs text-slate-400 mb-6">一度削除したデータは復元できません。</p>
+                                <div className="flex gap-3">
+                                    <button onClick={() => setDeleteConfirmIds(null)} className="flex-1 py-3 bg-slate-100 font-bold text-slate-500 rounded-2xl text-sm">戻る</button>
+                                    <button onClick={() => handleDelete(deleteConfirmIds)} className="flex-1 py-3 bg-red-500 font-bold text-white rounded-2xl text-sm shadow-md">削除</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {isLoading && (
+                        <div className="fixed inset-0 bg-slate-900/10 backdrop-blur-[1px] z-[90] flex items-center justify-center">
+                            <div className="bg-white p-5 rounded-3xl shadow-2xl flex items-center gap-3">
+                                <Icon name="loader-2" className="animate-spin text-blue-600" />
+                                <span className="font-black text-slate-700">同期中...</span>
+                            </div>
+                        </div>
+                    )}
+
+                    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-3 flex flex-col shadow-sm">
+                        <div className="flex justify-between items-center">
+                            <h1 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                                <Icon name="plus-circle" className="text-blue-600" /> 痛み記録
+                            </h1>
+                            {activeTab === 'history' && records.length > 0 && (
+                                <button onClick={exportCSV} className="text-xs font-bold text-green-700 bg-green-50 px-3 py-1.5 rounded-full border border-green-200 flex items-center gap-1">
+                                    <Icon name="download" size={14} /> 出力
+                                </button>
+                            )}
+                        </div>
+                        {errorMsg && (
+                            <div className="mt-2 bg-red-50 border border-red-100 p-2 rounded-xl flex items-start gap-2">
+                                <Icon name="alert-circle" size={14} className="text-red-500 mt-0.5" />
+                                <p className="text-[10px] text-red-700 flex-1">{errorMsg}</p>
+                                <button onClick={() => setErrorMsg('')}><Icon name="x" size={14} className="text-red-300" /></button>
+                            </div>
+                        )}
+                    </header>
+
+                    <main className="flex-1 overflow-y-auto pb-24">
+                        {showSuccess && !editingKey && (
+                            <div className="mx-4 mt-4 bg-green-50 border border-green-200 p-4 rounded-2xl flex items-center gap-3 fade-in shadow-sm">
+                                <Icon name="check-circle-2" className="text-green-500" size={24} />
+                                <span className="text-sm font-black text-green-700">{successMsg}</span>
+                            </div>
+                        )}
+
+                        {activeTab === 'input' && (
+                            <div className="p-4 space-y-4 fade-in">
+                                {!gasUrl && (
+                                    <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-[10px] text-amber-800 leading-relaxed shadow-sm">
+                                        <strong>⚠️ 設定未完了</strong><br/>
+                                        「設定」タブでURLを保存すると同期が有効になります。
+                                    </div>
+                                )}
+                                <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-4">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">日時</label>
+                                    <div className="flex gap-2">
+                                        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold" />
+                                        <input type="time" value={time} onChange={e => {
+                                            setTime(e.target.value);
+                                            setTiming(guessTimingFromTime(e.target.value));
+                                        }} className="w-28 bg-slate-50 border border-slate-200 rounded-xl px-2 py-3 text-sm font-bold text-center" />
+                                    </div>
+                                    <div className="grid grid-cols-4 gap-2">
+                                        {TIMINGS.map(t => (
+                                            <button key={t.id} onClick={() => setTiming(t.id)} className={`flex flex-col items-center py-3 rounded-2xl border text-[10px] font-black transition-all ${timing === t.id ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
+                                                <Icon name={t.icon} size={18} className="mb-1" />{t.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-6">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">部位とレベル</label>
+                                    {BODY_PARTS.map(part => (
+                                        <SliderRow 
+                                            key={part.id} 
+                                            part={part} 
+                                            lv={partLevels[part.id]} 
+                                            onChange={val => setPartLevels({ ...partLevels, [part.id]: val })} 
+                                        />
+                                    ))}
+                                </div>
+
+                                <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">メモ</label>
+                                    <textarea value={memo} onChange={e => setMemo(e.target.value)} placeholder="例：歩くと痛がる など" className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm min-h-[100px] outline-none" />
+                                </div>
+
+                                <button onClick={handleSave} disabled={!Object.values(partLevels).some(v => v > 0) || isLoading} className="w-full py-5 bg-blue-600 text-white font-black text-xl rounded-[2rem] shadow-xl shadow-blue-100 disabled:bg-slate-200 active:scale-95 transition-all flex items-center justify-center gap-3">
+                                    <Icon name="plus-circle" size={24} /> 記録を保存
+                                </button>
+                            </div>
+                        )}
+
+                        {activeTab === 'body' && (
+                            <div className="p-4 space-y-5 fade-in text-center">
+                                <h2 className="font-black text-slate-800 text-lg">1日の推移</h2>
+                                <input type="date" value={displayDate} onChange={e => setDisplayDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-2xl p-4 text-sm font-black text-center shadow-sm" />
+                                <div className="grid grid-cols-2 gap-4">
+                                    {['morning', 'noon', 'evening', 'night'].map(tid => <Silhouette key={tid} timingId={tid} levelsByTiming={currentLevelsByTiming} />)}
+                                </div>
+                                <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+                                    <div className="flex justify-between text-[10px] font-black text-slate-400 mb-2 uppercase tracking-widest"><span>Lv.1 (弱い)</span><span>Lv.10 (強い)</span></div>
+                                    <div className="h-2.5 w-full rounded-full bg-gradient-to-r from-red-100 via-red-400 to-red-600 shadow-inner"></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'history' && (
+                            <div className="p-4 fade-in">
+                                {editingKey ? (
+                                    <div className="space-y-4 fade-in">
+                                        <div className="flex justify-between items-center bg-blue-50 p-5 rounded-3xl border border-blue-100">
+                                            <span className="font-black text-blue-800 flex items-center gap-2"><Icon name="pencil" size={20}/> 修正</span>
+                                            <button onClick={() => setEditingKey(null)} className="p-2 hover:bg-blue-100 rounded-full transition-colors"><Icon name="x" className="text-blue-400"/></button>
+                                        </div>
+                                        <div className="bg-white p-5 rounded-3xl border border-slate-100 space-y-5 shadow-sm">
+                                            <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-bold border border-slate-200" />
+                                            <div className="space-y-4">
+                                                {BODY_PARTS.map(part => (
+                                                    <SliderRow 
+                                                        key={part.id} 
+                                                        part={part} 
+                                                        lv={editPartLevels[part.id]} 
+                                                        onChange={val => setEditPartLevels({ ...editPartLevels, [part.id]: val })} 
+                                                    />
+                                                ))}
+                                            </div>
+                                            <textarea value={editMemo} onChange={e => setEditMemo(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm min-h-[100px]" />
+                                            <button onClick={saveEditing} className="w-full py-5 bg-slate-800 text-white font-black rounded-3xl shadow-xl active:scale-95 transition-all">上書き保存する</button>
+                                        </div>
+                                    </div>
+                                ) : sortedKeys.length === 0 ? (
+                                    <div className="mt-24 text-center"><Icon name="clipboard-list" size={80} className="mx-auto mb-6 text-slate-200" /><p className="font-black text-slate-300">記録がまだありません</p></div>
+                                ) : (
+                                    <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left min-w-[750px] border-collapse">
+                                                <thead>
+                                                    <tr className="bg-slate-50 text-[10px] font-black text-slate-500 border-b uppercase tracking-widest">
+                                                        <th className="p-4 sticky left-0 bg-slate-50 z-10 border-r w-[90px]">日時</th>
+                                                        {BODY_PARTS.map(p => <th key={p.id} className="p-4 text-center w-[70px]">{p.label.split(' ')[0]}</th>)}
+                                                        <th className="p-4 min-w-[150px]">メモ</th>
+                                                        <th className="p-4 text-center w-[100px]">操作</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100 text-sm">
+                                                    {sortedKeys.map(key => {
+                                                        const r = grouped[key];
+                                                        const d = new Date(r.timestamp);
+                                                        const t = TIMINGS.find(ti => ti.id === r.timing);
+                                                        return (
+                                                            <tr key={key} className="hover:bg-slate-50 group">
+                                                                <td className="p-4 sticky left-0 bg-white group-hover:bg-slate-50 z-10 border-r shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]">
+                                                                    <div className="font-black text-slate-800">{d.getMonth()+1}/{d.getDate()}</div>
+                                                                    <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1 font-bold"><Icon name={t?.icon} size={10}/>{String(d.getHours()).padStart(2,'0')}:{String(d.getMinutes()).padStart(2,'0')}</div>
+                                                                </td>
+                                                                {BODY_PARTS.map(p => {
+                                                                    const lv = r.parts[p.label];
+                                                                    return <td key={p.id} className="p-3 text-center">{lv ? <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-[11px] font-black shadow-sm ${getLevelColor(lv, true)}`}>{lv}</span> : <span className="text-slate-200 font-bold">-</span>}</td>
+                                                                })}
+                                                                <td className="p-4 text-[11px] text-slate-600 leading-relaxed">{r.memos.join(' / ')}</td>
+                                                                <td className="p-3 text-center">
+                                                                    <div className="flex justify-center gap-1">
+                                                                        <button onClick={() => startEditingRow(key)} className="p-2.5 text-slate-300 hover:text-blue-600 active:scale-90 transition-all"><Icon name="pencil" size={18}/></button>
+                                                                        <button onClick={() => setDeleteConfirmIds(r.ids)} className="p-2.5 text-slate-300 hover:text-red-600 active:scale-90 transition-all"><Icon name="trash-2" size={18}/></button>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div className="bg-slate-50 p-3 text-[10px] font-black text-slate-400 text-center border-t flex items-center justify-center gap-2">
+                                            表は横にスワイプして確認できます <span className="text-lg">👉</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {activeTab === 'settings' && (
+                            <div className="p-4 fade-in">
+                                <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl flex flex-col items-center text-center">
+                                    <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-6 shadow-inner"><Icon name="settings" className="text-blue-500" size={40}/></div>
+                                    <h2 className="text-xl font-black text-slate-800 mb-3">同期設定</h2>
+                                    <p className="text-xs text-slate-400 leading-relaxed mb-8 px-4 font-medium">ご家族で同じURLを設定するとデータが同期されます。URLの記号などは自動で除去されます。</p>
+                                    <input type="text" value={gasUrl} onChange={e => setGasUrl(e.target.value)} placeholder="https://script.google.com/..." className="w-full bg-slate-50 border border-slate-200 rounded-[1.25rem] px-5 py-4 text-xs font-medium focus:ring-4 focus:ring-blue-100 outline-none transition-all shadow-inner mb-6" />
+                                    <button onClick={saveGasUrl} className="w-full py-5 bg-slate-900 text-white font-black rounded-[1.25rem] shadow-xl text-sm tracking-widest active:scale-95 transition-all">保存して同期開始</button>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-slate-200 z-[80] shadow-sm">
+                        <div className="flex h-20">
+                            {[
+                                { id: 'input', label: '記録', icon: 'plus-circle' },
+                                { id: 'body', label: '状態', icon: 'user' },
+                                { id: 'history', label: '履歴', icon: 'clipboard-list' },
+                                { id: 'settings', label: '設定', icon: 'settings' }
+                            ].map(tab => (
+                                <button key={tab.id} onClick={() => {
+                                    setActiveTab(tab.id);
+                                    if (tab.id === 'history' || tab.id === 'body') fetchData(gasUrl);
+                                }} className={`flex-1 flex flex-col items-center justify-center transition-all relative ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`}>
+                                    {activeTab === tab.id && <div className="absolute top-0 w-8 h-1 bg-blue-600 rounded-b-full"></div>}
+                                    <Icon name={tab.icon} size={24} />
+                                    <span className="text-[10px] font-black mt-1.5">{tab.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </nav>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
