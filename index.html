@@ -8,7 +8,8 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdn.jsdelivr.net/npm/lucide-static@0.321.0/font/lucide.css" rel="stylesheet">
+    <!-- 確実に表示されるFontAwesomeアイコンに変更 -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
         body { 
@@ -49,7 +50,11 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback } = React;
 
-        // --- 定数定義 ---
+        // アイコンコンポーネントをFontAwesome用に修正
+        const Icon = ({ name, size = 24, className = "" }) => (
+            <i className={`${name} ${className}`} style={{ fontSize: `${size}px`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}></i>
+        );
+
         const BODY_PARTS = [
             { id: 'head', label: '頭 (頭痛)', emoji: '🤕' },
             { id: 'wrist_r', label: '右手首', emoji: '🤚' },
@@ -62,10 +67,10 @@
         ];
 
         const TIMINGS = [
-            { id: 'morning', label: '朝', icon: 'sun', color: 'text-orange-500' },
-            { id: 'noon', label: '昼', icon: 'cloud-sun', color: 'text-amber-500' },
-            { id: 'evening', label: '晩', icon: 'moon', color: 'text-blue-500' },
-            { id: 'night', label: '夜/寝前', icon: 'moon-star', color: 'text-indigo-600' },
+            { id: 'morning', label: '朝', icon: 'fa-solid fa-sun', color: 'text-orange-500' },
+            { id: 'noon', label: '昼', icon: 'fa-solid fa-cloud-sun', color: 'text-amber-500' },
+            { id: 'evening', label: '晩', icon: 'fa-solid fa-moon', color: 'text-blue-500' },
+            { id: 'night', label: '夜/寝前', icon: 'fa-solid fa-cloud-moon', color: 'text-indigo-600' },
         ];
 
         const BODY_MAP = {
@@ -78,9 +83,6 @@
             ankle_l: { cx: 125, cy: 350, r: 18 },
         };
 
-        const INITIAL_LEVELS = BODY_PARTS.reduce((acc, part) => ({ ...acc, [part.id]: 0 }), {});
-
-        // --- ユーティリティ関数 ---
         const guessTimingFromTime = (timeStr) => {
             if (!timeStr) return 'morning';
             const hour = parseInt(timeStr.split(':')[0], 10);
@@ -90,17 +92,14 @@
             return 'night';
         };
 
+        const INITIAL_LEVELS = BODY_PARTS.reduce((acc, part) => ({ ...acc, [part.id]: 0 }), {});
+
         const getLevelColor = (lv, isBadge = false) => {
             if (lv === 0) return isBadge ? 'text-slate-400 bg-slate-50 border-slate-200' : 'bg-slate-200';
             if (lv <= 3) return isBadge ? 'text-green-600 bg-green-50 border-green-200' : 'bg-green-500';
             if (lv <= 6) return isBadge ? 'text-amber-700 bg-amber-50 border-amber-200' : 'bg-amber-500';
             return isBadge ? 'text-red-700 bg-red-50 border-red-200' : 'bg-red-500';
         };
-
-        // --- 共通コンポーネント ---
-        const Icon = ({ name, size = 24, className = "" }) => (
-            <i className={`lucide-${name} ${className}`} style={{ fontSize: size, width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}></i>
-        );
 
         const Silhouette = ({ timingId, levelsByTiming }) => {
             const levels = levelsByTiming[timingId];
@@ -218,7 +217,7 @@
                         localStorage.setItem('pain_records', JSON.stringify(data));
                     }
                 } catch (e) {
-                    setErrorMsg("データの同期に失敗しました。URLまたはGASの設定（権限）を確認してください。");
+                    setErrorMsg("データの同期に失敗しました。URLまたはGASの設定を確認してください。");
                 }
                 setIsLoading(false);
             };
@@ -280,6 +279,34 @@
                 setDeleteConfirmIds(null);
             };
 
+            const getGroupedRecords = () => {
+                const grouped = {};
+                records.forEach(r => {
+                    const key = r.timestamp;
+                    if (!grouped[key]) grouped[key] = { timestamp: r.timestamp, timing: r.timing, memos: [], parts: {}, ids: [] };
+                    grouped[key].parts[r.part] = r.level;
+                    if (r.memo && !grouped[key].memos.includes(r.memo)) grouped[key].memos.push(r.memo);
+                    grouped[key].ids.push(r.id);
+                });
+                return grouped;
+            };
+
+            const startEditing = (key) => {
+                const row = getGroupedRecords()[key];
+                const [d, t] = row.timestamp.split('T');
+                setEditDate(d);
+                setEditTime(t.substring(0, 5));
+                setEditTiming(row.timing);
+                const levels = { ...INITIAL_LEVELS };
+                Object.keys(row.parts).forEach(label => {
+                    const p = BODY_PARTS.find(part => part.label === label);
+                    if (p) levels[p.id] = row.parts[label];
+                });
+                setEditPartLevels(levels);
+                setEditMemo(row.memos.join(' / '));
+                setEditingKey(key);
+            };
+
             const saveEditing = async () => {
                 const partsToSave = Object.entries(editPartLevels).filter(([_, lv]) => lv > 0);
                 if (partsToSave.length === 0) return;
@@ -312,19 +339,7 @@
                 setIsLoading(false);
             };
 
-            const getGroupedRecords = useCallback(() => {
-                const grouped = {};
-                records.forEach(r => {
-                    const key = r.timestamp;
-                    if (!grouped[key]) grouped[key] = { timestamp: r.timestamp, timing: r.timing, memos: [], parts: {}, ids: [] };
-                    grouped[key].parts[r.part] = r.level;
-                    if (r.memo && !grouped[key].memos.includes(r.memo)) grouped[key].memos.push(r.memo);
-                    grouped[key].ids.push(r.id);
-                });
-                return grouped;
-            }, [records]);
-
-            const getLevelsByTiming = useCallback(() => {
+            const getLevelsByTiming = () => {
                 const res = { morning: {}, noon: {}, evening: {}, night: {} };
                 const filtered = records.filter(r => r.timestamp.startsWith(displayDate));
                 filtered.forEach(r => {
@@ -333,7 +348,7 @@
                     if (p && res[t][p.id] === undefined) res[t][p.id] = r.level;
                 });
                 return res;
-            }, [records, displayDate]);
+            };
 
             const saveGasUrl = () => {
                 const cleanedUrl = gasUrl.replace(/^[\[<"'\s]+|[\]>"'\s]+$/g, '').trim();
@@ -368,25 +383,10 @@
                 a.click();
             };
 
+            // レンダリング用のデータ準備
             const grouped = getGroupedRecords();
             const sortedKeys = Object.keys(grouped).sort((a,b) => new Date(b) - new Date(a));
             const currentLevelsByTiming = getLevelsByTiming();
-
-            const startEditingRow = (key) => {
-                const row = grouped[key];
-                const [d, t] = row.timestamp.split('T');
-                setEditDate(d);
-                setEditTime(t.substring(0, 5));
-                setEditTiming(row.timing);
-                const levels = { ...INITIAL_LEVELS };
-                Object.keys(row.parts).forEach(label => {
-                    const p = BODY_PARTS.find(part => part.label === label);
-                    if (p) levels[p.id] = row.parts[label];
-                });
-                setEditPartLevels(levels);
-                setEditMemo(row.memos.join(' / '));
-                setEditingKey(key);
-            };
 
             return (
                 <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col relative pb-safe overflow-x-hidden">
@@ -394,7 +394,9 @@
                     {deleteConfirmIds && (
                         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                             <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl fade-in text-center">
-                                <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mb-4 mx-auto"><Icon name="trash-2" className="text-red-500" size={28} /></div>
+                                <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mb-4 mx-auto">
+                                    <Icon name="fa-solid fa-trash-can" className="text-red-500" size={28} />
+                                </div>
                                 <h3 className="font-black text-slate-800 mb-2">記録を削除しますか？</h3>
                                 <p className="text-xs text-slate-400 mb-6">一度削除したデータは復元できません。</p>
                                 <div className="flex gap-3">
@@ -408,7 +410,7 @@
                     {isLoading && (
                         <div className="fixed inset-0 bg-slate-900/10 backdrop-blur-[1px] z-[90] flex items-center justify-center">
                             <div className="bg-white p-5 rounded-3xl shadow-2xl flex items-center gap-3">
-                                <Icon name="loader-2" className="animate-spin text-blue-600" />
+                                <Icon name="fa-solid fa-spinner" className="animate-spin text-blue-600" />
                                 <span className="font-black text-slate-700">同期中...</span>
                             </div>
                         </div>
@@ -417,19 +419,19 @@
                     <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-3 flex flex-col shadow-sm">
                         <div className="flex justify-between items-center">
                             <h1 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                                <Icon name="plus-circle" className="text-blue-600" /> 痛み記録
+                                <Icon name="fa-solid fa-circle-plus" className="text-blue-600" /> 痛み記録
                             </h1>
                             {activeTab === 'history' && records.length > 0 && (
                                 <button onClick={exportCSV} className="text-xs font-bold text-green-700 bg-green-50 px-3 py-1.5 rounded-full border border-green-200 flex items-center gap-1">
-                                    <Icon name="download" size={14} /> 出力
+                                    <Icon name="fa-solid fa-download" size={14} /> 出力
                                 </button>
                             )}
                         </div>
                         {errorMsg && (
                             <div className="mt-2 bg-red-50 border border-red-100 p-2 rounded-xl flex items-start gap-2">
-                                <Icon name="alert-circle" size={14} className="text-red-500 mt-0.5" />
+                                <Icon name="fa-solid fa-circle-exclamation" size={14} className="text-red-500 mt-0.5" />
                                 <p className="text-[10px] text-red-700 flex-1">{errorMsg}</p>
-                                <button onClick={() => setErrorMsg('')}><Icon name="x" size={14} className="text-red-300" /></button>
+                                <button onClick={() => setErrorMsg('')}><Icon name="fa-solid fa-xmark" size={14} className="text-red-300" /></button>
                             </div>
                         )}
                     </header>
@@ -437,7 +439,7 @@
                     <main className="flex-1 overflow-y-auto pb-24">
                         {showSuccess && !editingKey && (
                             <div className="mx-4 mt-4 bg-green-50 border border-green-200 p-4 rounded-2xl flex items-center gap-3 fade-in shadow-sm">
-                                <Icon name="check-circle-2" className="text-green-500" size={24} />
+                                <Icon name="fa-solid fa-circle-check" className="text-green-500" size={24} />
                                 <span className="text-sm font-black text-green-700">{successMsg}</span>
                             </div>
                         )}
@@ -486,7 +488,7 @@
                                 </div>
 
                                 <button onClick={handleSave} disabled={!Object.values(partLevels).some(v => v > 0) || isLoading} className="w-full py-5 bg-blue-600 text-white font-black text-xl rounded-[2rem] shadow-xl shadow-blue-100 disabled:bg-slate-200 active:scale-95 transition-all flex items-center justify-center gap-3">
-                                    <Icon name="plus-circle" size={24} /> 記録を保存
+                                    <Icon name="fa-solid fa-circle-plus" size={24} /> 記録を保存
                                 </button>
                             </div>
                         )}
@@ -510,8 +512,8 @@
                                 {editingKey ? (
                                     <div className="space-y-4 fade-in">
                                         <div className="flex justify-between items-center bg-blue-50 p-5 rounded-3xl border border-blue-100">
-                                            <span className="font-black text-blue-800 flex items-center gap-2"><Icon name="pencil" size={20}/> 修正</span>
-                                            <button onClick={() => setEditingKey(null)} className="p-2 hover:bg-blue-100 rounded-full transition-colors"><Icon name="x" className="text-blue-400"/></button>
+                                            <span className="font-black text-blue-800 flex items-center gap-2"><Icon name="fa-solid fa-pen" size={20}/> 修正</span>
+                                            <button onClick={() => setEditingKey(null)} className="p-2 hover:bg-blue-100 rounded-full transition-colors"><Icon name="fa-solid fa-xmark" className="text-blue-400"/></button>
                                         </div>
                                         <div className="bg-white p-5 rounded-3xl border border-slate-100 space-y-5 shadow-sm">
                                             <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-bold border border-slate-200" />
@@ -526,11 +528,19 @@
                                                 ))}
                                             </div>
                                             <textarea value={editMemo} onChange={e => setEditMemo(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm min-h-[100px]" />
-                                            <button onClick={saveEditing} className="w-full py-5 bg-slate-800 text-white font-black rounded-3xl shadow-xl active:scale-95 transition-all">上書き保存する</button>
+                                            
+                                            {/* 追加：キャンセルボタンと保存ボタンを横並びに */}
+                                            <div className="flex gap-3">
+                                                <button onClick={() => setEditingKey(null)} className="flex-1 py-5 bg-slate-100 text-slate-500 font-black rounded-3xl active:scale-95 transition-all">キャンセル</button>
+                                                <button onClick={saveEditing} className="flex-1 py-5 bg-slate-800 text-white font-black rounded-3xl shadow-xl active:scale-95 transition-all">上書き保存</button>
+                                            </div>
                                         </div>
                                     </div>
                                 ) : sortedKeys.length === 0 ? (
-                                    <div className="mt-24 text-center"><Icon name="clipboard-list" size={80} className="mx-auto mb-6 text-slate-200" /><p className="font-black text-slate-300">記録がまだありません</p></div>
+                                    <div className="mt-24 text-center">
+                                        <Icon name="fa-solid fa-clipboard-list" size={80} className="mx-auto mb-6 text-slate-200" />
+                                        <p className="font-black text-slate-300">記録がまだありません</p>
+                                    </div>
                                 ) : (
                                     <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
                                         <div className="overflow-x-auto">
@@ -561,8 +571,8 @@
                                                                 <td className="p-4 text-[11px] text-slate-600 leading-relaxed">{r.memos.join(' / ')}</td>
                                                                 <td className="p-3 text-center">
                                                                     <div className="flex justify-center gap-1">
-                                                                        <button onClick={() => startEditingRow(key)} className="p-2.5 text-slate-300 hover:text-blue-600 active:scale-90 transition-all"><Icon name="pencil" size={18}/></button>
-                                                                        <button onClick={() => setDeleteConfirmIds(r.ids)} className="p-2.5 text-slate-300 hover:text-red-600 active:scale-90 transition-all"><Icon name="trash-2" size={18}/></button>
+                                                                        <button onClick={() => startEditing(key)} className="p-2.5 text-slate-300 hover:text-blue-600 active:scale-90 transition-all"><Icon name="fa-solid fa-pen" size={18}/></button>
+                                                                        <button onClick={() => setDeleteConfirmIds(r.ids)} className="p-2.5 text-slate-300 hover:text-red-600 active:scale-90 transition-all"><Icon name="fa-solid fa-trash-can" size={18}/></button>
                                                                     </div>
                                                                 </td>
                                                             </tr>
@@ -570,9 +580,6 @@
                                                     })}
                                                 </tbody>
                                             </table>
-                                        </div>
-                                        <div className="bg-slate-50 p-3 text-[10px] font-black text-slate-400 text-center border-t flex items-center justify-center gap-2">
-                                            表は横にスワイプして確認できます <span className="text-lg">👉</span>
                                         </div>
                                     </div>
                                 )}
@@ -582,7 +589,7 @@
                         {activeTab === 'settings' && (
                             <div className="p-4 fade-in">
                                 <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl flex flex-col items-center text-center">
-                                    <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-6 shadow-inner"><Icon name="settings" className="text-blue-500" size={40}/></div>
+                                    <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-6 shadow-inner"><Icon name="fa-solid fa-gear" className="text-blue-500" size={40}/></div>
                                     <h2 className="text-xl font-black text-slate-800 mb-3">同期設定</h2>
                                     <p className="text-xs text-slate-400 leading-relaxed mb-8 px-4 font-medium">ご家族で同じURLを設定するとデータが同期されます。URLの記号などは自動で除去されます。</p>
                                     <input type="text" value={gasUrl} onChange={e => setGasUrl(e.target.value)} placeholder="https://script.google.com/..." className="w-full bg-slate-50 border border-slate-200 rounded-[1.25rem] px-5 py-4 text-xs font-medium focus:ring-4 focus:ring-blue-100 outline-none transition-all shadow-inner mb-6" />
@@ -595,10 +602,10 @@
                     <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-slate-200 z-[80] shadow-sm">
                         <div className="flex h-20">
                             {[
-                                { id: 'input', label: '記録', icon: 'plus-circle' },
-                                { id: 'body', label: '状態', icon: 'user' },
-                                { id: 'history', label: '履歴', icon: 'clipboard-list' },
-                                { id: 'settings', label: '設定', icon: 'settings' }
+                                { id: 'input', label: '記録', icon: 'fa-solid fa-circle-plus' },
+                                { id: 'body', label: '状態', icon: 'fa-solid fa-user' },
+                                { id: 'history', label: '履歴', icon: 'fa-solid fa-clipboard-list' },
+                                { id: 'settings', label: '設定', icon: 'fa-solid fa-gear' }
                             ].map(tab => (
                                 <button key={tab.id} onClick={() => {
                                     setActiveTab(tab.id);
