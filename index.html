@@ -90,6 +90,21 @@
             return 'night';
         };
 
+        const getLocalDateString = () => {
+            const d = new Date();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        const getLocalTimeString = () => {
+            const d = new Date();
+            const hours = String(d.getHours()).padStart(2, '0');
+            const minutes = String(d.getMinutes()).padStart(2, '0');
+            return `${hours}:${minutes}`;
+        };
+
         const INITIAL_LEVELS = BODY_PARTS.reduce((acc, part) => ({ ...acc, [part.id]: 0 }), {});
 
         const getLevelColor = (lv, isBadge = false) => {
@@ -175,12 +190,12 @@
             const [showSuccess, setShowSuccess] = useState(false);
             const [successMsg, setSuccessMsg] = useState('');
             const [errorMsg, setErrorMsg] = useState('');
-            const [displayDate, setDisplayDate] = useState(new Date().toISOString().split('T')[0]);
+            const [displayDate, setDisplayDate] = useState(getLocalDateString());
             const [deleteConfirmIds, setDeleteConfirmIds] = useState(null);
 
-            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-            const [time, setTime] = useState(new Date().toTimeString().substring(0, 5));
-            const [timing, setTiming] = useState(guessTimingFromTime(new Date().toTimeString().substring(0, 5)));
+            const [date, setDate] = useState(getLocalDateString());
+            const [time, setTime] = useState(getLocalTimeString());
+            const [timing, setTiming] = useState(guessTimingFromTime(getLocalTimeString()));
             const [partLevels, setPartLevels] = useState(INITIAL_LEVELS);
             const [memo, setMemo] = useState('');
 
@@ -291,12 +306,10 @@
             const startEditing = (key) => {
                 const row = getGroupedRecords()[key];
                 
-                // 修正：日時の取り出し方を、Dateオブジェクトを使った安全な抽出に変更
                 const dObj = new Date(row.timestamp);
                 let dStr = '';
                 let tStr = '';
 
-                // 日付が正常に読み込めた場合のみ処理
                 if (!isNaN(dObj.getTime())) {
                     const yyyy = dObj.getFullYear();
                     const mm = String(dObj.getMonth() + 1).padStart(2, '0');
@@ -307,10 +320,8 @@
                     const min = String(dObj.getMinutes()).padStart(2, '0');
                     tStr = `${hh}:${min}`;
                 } else {
-                    // もし壊れたデータを開こうとした場合は今日の日付をセット
-                    const now = new Date();
-                    dStr = now.toISOString().split('T')[0];
-                    tStr = now.toTimeString().substring(0, 5);
+                    dStr = getLocalDateString();
+                    tStr = getLocalTimeString();
                 }
 
                 setEditDate(dStr);
@@ -387,7 +398,7 @@
                 const rows = sorted.map(key => {
                     const r = grouped[key];
                     const d = new Date(r.timestamp);
-                    if (isNaN(d.getTime())) return ""; // 壊れたデータは出力から除外
+                    if (isNaN(d.getTime())) return ""; 
                     return [
                         `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`,
                         `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,
@@ -578,7 +589,6 @@
                                                         const r = grouped[key];
                                                         const d = new Date(r.timestamp);
                                                         
-                                                        // 壊れたデータを安全にスキップ・または表示のみする処理
                                                         if (isNaN(d.getTime())) {
                                                             return (
                                                                 <tr key={key} className="hover:bg-slate-50 group">
