@@ -8,7 +8,6 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 確実に表示されるFontAwesomeアイコンに変更 -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
@@ -50,7 +49,6 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback } = React;
 
-        // アイコンコンポーネントをFontAwesome用に修正
         const Icon = ({ name, size = 24, className = "" }) => (
             <i className={`${name} ${className}`} style={{ fontSize: `${size}px`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}></i>
         );
@@ -169,7 +167,6 @@
             );
         };
 
-        // --- メインアプリケーション ---
         function App() {
             const [activeTab, setActiveTab] = useState('input');
             const [records, setRecords] = useState([]);
@@ -217,7 +214,7 @@
                         localStorage.setItem('pain_records', JSON.stringify(data));
                     }
                 } catch (e) {
-                    setErrorMsg("データの同期に失敗しました。URLまたはGASの設定を確認してください。");
+                    setErrorMsg("データの同期に失敗しました。URLまたはGASの設定（権限）を確認してください。");
                 }
                 setIsLoading(false);
             };
@@ -293,10 +290,33 @@
 
             const startEditing = (key) => {
                 const row = getGroupedRecords()[key];
-                const [d, t] = row.timestamp.split('T');
-                setEditDate(d);
-                setEditTime(t.substring(0, 5));
+                
+                // 修正：日時の取り出し方を、Dateオブジェクトを使った安全な抽出に変更
+                const dObj = new Date(row.timestamp);
+                let dStr = '';
+                let tStr = '';
+
+                // 日付が正常に読み込めた場合のみ処理
+                if (!isNaN(dObj.getTime())) {
+                    const yyyy = dObj.getFullYear();
+                    const mm = String(dObj.getMonth() + 1).padStart(2, '0');
+                    const dd = String(dObj.getDate()).padStart(2, '0');
+                    dStr = `${yyyy}-${mm}-${dd}`;
+                    
+                    const hh = String(dObj.getHours()).padStart(2, '0');
+                    const min = String(dObj.getMinutes()).padStart(2, '0');
+                    tStr = `${hh}:${min}`;
+                } else {
+                    // もし壊れたデータを開こうとした場合は今日の日付をセット
+                    const now = new Date();
+                    dStr = now.toISOString().split('T')[0];
+                    tStr = now.toTimeString().substring(0, 5);
+                }
+
+                setEditDate(dStr);
+                setEditTime(tStr);
                 setEditTiming(row.timing);
+
                 const levels = { ...INITIAL_LEVELS };
                 Object.keys(row.parts).forEach(label => {
                     const p = BODY_PARTS.find(part => part.label === label);
@@ -367,6 +387,7 @@
                 const rows = sorted.map(key => {
                     const r = grouped[key];
                     const d = new Date(r.timestamp);
+                    if (isNaN(d.getTime())) return ""; // 壊れたデータは出力から除外
                     return [
                         `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`,
                         `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,
@@ -374,7 +395,8 @@
                         ...BODY_PARTS.map(p => r.parts[p.label] || ""),
                         `"${r.memos.join(' / ').replace(/"/g, '""')}"`
                     ].join(",");
-                });
+                }).filter(row => row !== "");
+                
                 const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), [headers.join(","), ...rows].join("\n")], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
@@ -383,7 +405,6 @@
                 a.click();
             };
 
-            // レンダリング用のデータ準備
             const grouped = getGroupedRecords();
             const sortedKeys = Object.keys(grouped).sort((a,b) => new Date(b) - new Date(a));
             const currentLevelsByTiming = getLevelsByTiming();
@@ -410,7 +431,7 @@
                     {isLoading && (
                         <div className="fixed inset-0 bg-slate-900/10 backdrop-blur-[1px] z-[90] flex items-center justify-center">
                             <div className="bg-white p-5 rounded-3xl shadow-2xl flex items-center gap-3">
-                                <Icon name="fa-solid fa-spinner" className="animate-spin text-blue-600" />
+                                <Icon name="fa-solid fa-spinner fa-spin" className="text-blue-600" />
                                 <span className="font-black text-slate-700">同期中...</span>
                             </div>
                         </div>
@@ -529,7 +550,6 @@
                                             </div>
                                             <textarea value={editMemo} onChange={e => setEditMemo(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm min-h-[100px]" />
                                             
-                                            {/* 追加：キャンセルボタンと保存ボタンを横並びに */}
                                             <div className="flex gap-3">
                                                 <button onClick={() => setEditingKey(null)} className="flex-1 py-5 bg-slate-100 text-slate-500 font-black rounded-3xl active:scale-95 transition-all">キャンセル</button>
                                                 <button onClick={saveEditing} className="flex-1 py-5 bg-slate-800 text-white font-black rounded-3xl shadow-xl active:scale-95 transition-all">上書き保存</button>
@@ -557,6 +577,22 @@
                                                     {sortedKeys.map(key => {
                                                         const r = grouped[key];
                                                         const d = new Date(r.timestamp);
+                                                        
+                                                        // 壊れたデータを安全にスキップ・または表示のみする処理
+                                                        if (isNaN(d.getTime())) {
+                                                            return (
+                                                                <tr key={key} className="hover:bg-slate-50 group">
+                                                                    <td className="p-4 sticky left-0 bg-white group-hover:bg-slate-50 z-10 border-r shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]">
+                                                                        <div className="font-black text-red-500">データ異常</div>
+                                                                    </td>
+                                                                    <td colSpan={BODY_PARTS.length + 1} className="p-4 text-[11px] text-slate-400 text-center">スプレッドシートから直接削除してください</td>
+                                                                    <td className="p-3 text-center">
+                                                                        <button onClick={() => setDeleteConfirmIds(r.ids)} className="p-2.5 text-slate-300 hover:text-red-600 active:scale-90 transition-all"><Icon name="fa-solid fa-trash-can" size={18}/></button>
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        }
+
                                                         const t = TIMINGS.find(ti => ti.id === r.timing);
                                                         return (
                                                             <tr key={key} className="hover:bg-slate-50 group">
