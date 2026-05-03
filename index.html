@@ -208,6 +208,7 @@
 
             useEffect(() => {
                 const savedUrl = localStorage.getItem('gas_web_app_url');
+
                 if (savedUrl) {
                     setGasUrl(savedUrl);
                     fetchData(savedUrl);
@@ -286,6 +287,7 @@
                     const updated = records.filter(r => !ids.includes(r.id));
                     setRecords(updated);
                     localStorage.setItem('pain_records', JSON.stringify(updated));
+                    setTimeout(() => fetchData(gasUrl), 1500);
                 }
                 setIsLoading(false);
                 setDeleteConfirmIds(null);
@@ -637,9 +639,12 @@
                                 <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl flex flex-col items-center text-center">
                                     <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-6 shadow-inner"><Icon name="fa-solid fa-gear" className="text-blue-500" size={40}/></div>
                                     <h2 className="text-xl font-black text-slate-800 mb-3">同期設定</h2>
-                                    <p className="text-xs text-slate-400 leading-relaxed mb-8 px-4 font-medium">ご家族で同じURLを設定するとデータが同期されます。URLの記号などは自動で除去されます。</p>
+                                    <p className="text-xs text-slate-400 leading-relaxed mb-6 px-4 font-medium">ご家族で同じURLを設定するとデータが同期されます。URLの記号などは自動で除去されます。</p>
+                                    
                                     <input type="text" value={gasUrl} onChange={e => setGasUrl(e.target.value)} placeholder="https://script.google.com/..." className="w-full bg-slate-50 border border-slate-200 rounded-[1.25rem] px-5 py-4 text-xs font-medium focus:ring-4 focus:ring-blue-100 outline-none transition-all shadow-inner mb-6" />
-                                    <button onClick={saveGasUrl} className="w-full py-5 bg-slate-900 text-white font-black rounded-[1.25rem] shadow-xl text-sm tracking-widest active:scale-95 transition-all">保存して同期開始</button>
+                                    <button onClick={saveGasUrl} className="w-full py-5 bg-slate-900 text-white font-black rounded-[1.25rem] shadow-xl text-sm tracking-widest active:scale-95 transition-all mb-4">保存して同期開始</button>
+                                    
+                                    <p className="text-[10px] font-bold text-slate-300 mt-2">App Version: 2026.05.04</p>
                                 </div>
                             </div>
                         )}
